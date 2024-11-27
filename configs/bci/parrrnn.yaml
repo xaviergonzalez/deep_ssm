@@ -26,7 +26,7 @@ module_cfg:
   type: "bci"
 
 model_cfg:
-  type: "bci_gru"
+  type: "bci_parrrnn"
   configs:
     neural_dim: 256 #nInputFeatures
     n_classes: 40 #nClasses
