@@ -16,7 +16,7 @@ def quasi_deer_torch(
     diagonal_derivative,
     initial_state,  # (B,D)
     states_guess,  # (B,D, T)
-    drivers,  # (B, d_input)
+    inputs,  # (B, d_input, T)
     num_iters=10,  # controls number of newton iterations
     k=0.0,  # controls the amount of damping
 ):
@@ -24,29 +24,28 @@ def quasi_deer_torch(
     Currently is quasi-DEER/ELK
 
     Args:
-      f: a forward fxn that takes in a full state and an input, and outputs the next full state.
-          In the context of a GRU, f is a GRU cell, the full state is the hidden state, and the driver is the input
+      f: a forward fxn that takes in an input and a state, and outputs the next state. (following torch.nn.GRUCell convention)
+          In the context of a GRU, f is a GRU cell
           In pytorch setting, f should be able to handle the batch dimension
-      diagonal_derivative: a forward fxn that takes in full state and an input, and returns a length D diagonal derivative
+      diagonal_derivative: a forward fxn that takes in an input and a state, and returns a length D diagonal derivative
           In pytorch setting, f should be able to handle the batch dimension
       initial_state: (B,D)
-      states_guess, (B, D, T-1)
-      drivers, jax.Array, (B, d_input, T-1)
+      states_guess, (B, D, T)
+      inputs, (B, d_input, T)
       num_iters: number of iterations to run
-      k: int, k=0 is quasi-DEER, k is between 0 and 1, nonzero k is slim-quasi-ELK
+      k: int, k=0 is quasi-DEER, k is between 0 and 1, nonzero k is quasi-slim-ELK
     Notes:
-    - The initial_state is NOT the same as the initial mean we give to dynamax
-    - The initial_mean is something on which we do inference
     - The initial_state is the fixed starting point.
 
     The structure looks like the following.
-    Let h0 be the initial_state (fixed), h[1:T-1] be the states, and e[0:T-2] be the drivers
+    Let h0 be the initial_state (fixed), h[1:T-1] be the states, and e[0:T-2] be the inputs
 
     Then our graph looks like
 
-    h0 -----> h1 ---> h2 ---> ..... h_{T-2} ----> h_{T-1}
+    h0 -----> h1 ---> h2 ---> ..... h_{T-1} ----> h_{T}
+              ^       ^       ^          ^          ^
               |       |                   |          |
-              e1      e2       ..... e_{T-2}      e_{T-1}
+              e0      e1       ..... e_{T-2}      e_{T-1}
 
     Use the pytorch scan from: https://github.com/proger/accelerated-scan
     This scan expects inputs in the form (B,D,T)
@@ -66,17 +65,17 @@ def quasi_deer_torch(
         """
         # Evaluate f and its Jacobian in parallel across timesteps 1,..,T-1
         fs = torch.func.vmap(f, in_dims=-1, out_dims=-1)(
-            states[..., :-1], drivers[..., 1:]
-        )  # (B,D,T-1)
+            inputs[..., 1:], states[..., :-1]
+        )  # (B,D,T-1), in your diagram above, the first interacton is f(e1, h1)
 
         # Compute the As and bs from fs and Jfs
         As = (1.0 - k) * torch.func.vmap(diagonal_derivative, in_dims=-1, out_dims=-1)(
-            states[..., :-1], drivers[..., 1:]
+            inputs[..., 1:], states[..., :-1]
         )  # (B, D, T-1)
         bs = fs - As * states[..., :-1]  # (B, D, T-1)
 
         # initial_state is h0
-        b0 = f(initial_state, drivers[..., 0])  # h1, (B,D)
+        b0 = f(inputs[..., 0], initial_state)  # h1 = f(e0, h0), (B,D)
         A0 = torch.zeros_like(As[..., 0])  # (B,D)
         A = torch.cat(
             [A0.unsqueeze(-1), As, torch.ones([B, D, padded_T - T], device=device)],
@@ -87,15 +86,13 @@ def quasi_deer_torch(
             dim=-1,
         )  # (B, D, T)
 
-        # run appropriate parallel alg
+        # parallel asscociative scan
         new_states = scan(A, b)[..., :T]  # (B, D, T)
-        # trying in place modification to be more memory efficient
-        new_states.nan_to_num() # zero out nans
-        # new_states = torch.nan_to_num(new_states)  # zero out nans
+        new_states.nan_to_num()  # zero out nans, in place modification to be more memory efficient
         return new_states
 
     deer_traces = []
-    for i in range(num_iters):
+    for _ in range(num_iters):
         states_guess = step(states_guess)
         deer_traces.append(states_guess)
 
@@ -311,7 +308,7 @@ class ParrRNN(nn.Module):
                 diagonal_derivative=cell.diagonal_derivative,
                 initial_state=h0[:, 0],
                 states_guess=states_guess,
-                drivers=input,
+                inputs=input,
                 num_iters=self.num_iters,
             ) # (B,D,T)
             return output.transpose(1, 2)  # (batch_size, seq_len, hidden_size)
@@ -532,7 +529,7 @@ class ParrRNNDecoder(BaseDecoder):
         bidirectional=False,
         input_nonlinearity="softsign",
         num_iters=2, # number of iterations for quasi-DEER
-        method="minrnn", # minrrn or gru
+        method="minrnn", # minrnn or gru
         parallel=True # parallel implementation
     ):
         super(ParrRNNDecoder, self).__init__(
