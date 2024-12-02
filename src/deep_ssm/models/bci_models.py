@@ -117,7 +117,7 @@ class MinRNNCell(nn.Module):
         )
         self.b_u = nn.Parameter(torch.zeros(hidden_size))
 
-    def forward(self, prev_state, input):
+    def forward(self, input, prev_state):
         z = torch.tanh(torch.matmul(input, self.input_weights.T) + self.input_bias)
         u = torch.sigmoid(
             torch.matmul(prev_state, self.recurrent_weights.T)
@@ -127,7 +127,7 @@ class MinRNNCell(nn.Module):
         state = u * prev_state + (1 - u) * z
         return state
 
-    def diagonal_derivative(self, prev_state, input):
+    def diagonal_derivative(self, input, prev_state):
         z = torch.tanh(torch.matmul(input, self.input_weights.T) + self.input_bias)
         u = torch.sigmoid(
             torch.matmul(prev_state, self.recurrent_weights.T)
@@ -183,7 +183,10 @@ class AugmentedGRUCell(nn.GRUCell):
         return diag_jacobian
 
 
-class ParrRNN(nn.Module):
+class pRNN(nn.Module):
+    """
+    An RNN that can be evaluated in parallel using quasi-DEER
+    """
     def __init__(
         self,
         input_size,
@@ -197,7 +200,7 @@ class ParrRNN(nn.Module):
         method="minrnn", # minrrn or gru
         parallel=True # parallel implementation
     ):
-        super(ParrRNN, self).__init__()
+        super(pRNN, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.num_layers = num_layers
@@ -513,7 +516,7 @@ class GRUDecoder(BaseDecoder):
         return seq_out
 
 
-class ParrRNNDecoder(BaseDecoder):
+class pRNNDecoder(BaseDecoder):
     def __init__(
         self,
         neural_dim,
@@ -532,7 +535,7 @@ class ParrRNNDecoder(BaseDecoder):
         method="minrnn", # minrnn or gru
         parallel=True # parallel implementation
     ):
-        super(ParrRNNDecoder, self).__init__(
+        super(pRNNDecoder, self).__init__(
             neural_dim=neural_dim,
             nDays=nDays,
             strideLen=strideLen,
@@ -552,7 +555,7 @@ class ParrRNNDecoder(BaseDecoder):
         else:
             input_dims = self.neural_dim
 
-        self.rnn_decoder = ParrRNN(
+        self.rnn_decoder = pRNN(
             input_size=input_dims,
             hidden_size=hidden_dim,
             num_layers=layer_dim,

@@ -2,7 +2,7 @@ Comment: >
   # parallel rnn
 
 project_name: "speech_bci"
-experiment_name: "baseline_gru"
+experiment_name: "parallel_rnn"
 
 seed: 0
 
@@ -26,7 +26,7 @@ module_cfg:
   type: "bci"
 
 model_cfg:
-  type: "bci_parrrnn"
+  type: "bci_prnn"
   configs:
     neural_dim: 256 #nInputFeatures
     n_classes: 40 #nClasses

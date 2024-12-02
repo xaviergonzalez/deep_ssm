@@ -1,6 +1,6 @@
-from .bci_models import GRUDecoder, ParrRNNDecoder
+from .bci_models import GRUDecoder, pRNNDecoder
 
 all_models = {
   "bci_gru" : GRUDecoder,
-  "bci_parrrnn" : ParrRNNDecoder
+  "bci_prnn" : pRNNDecoder
 }
